@@ -132,6 +132,7 @@ async function describe_what_happened(character, player_intent, player_trait, ch
 			In terms of the result you are given: Success means they overcame the challenge. Failure means they overcame it, but their have lost some of their resolve in the process (i.e. got hurt, are psychologically scarred, got scared, etc.).
 			The setting for the challenge is: ${level_context}
 			The latest things that have occurred before this are: ${history.reverse().slice(0,2)}
+			Describe the challenge succinctly in around 100 words.
 			
 			Don't use terms like player or their name. Just use "You" or speak in the second person.
 			`,
