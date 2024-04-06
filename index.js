@@ -19,6 +19,7 @@ var app = express();
 // http://expressjs.com/en/starter/static-files.html
 app.use(express.static('public'));
 app.use(express.json());
+app.use(require("cors")())
 
 
 async function create_player(description) {
@@ -27,18 +28,34 @@ async function create_player(description) {
 		  {
 			role: "system",
 			content: `You are a helpful assistant designed to output JSON. 
-			Your task is to convert the given character description into a list of traits. 
-			Create 8 traits and assign a modifier to each of them: +5, +4, +3, +2, +1, +1, -1, -2.
+			Your task is to convert the given character description into a list of 5e type proficiency modifiers. 
+			Modifiers can be anything from +5 to -3
 			The higher the die size, the better the trait. 
 			Traits which seem to be a major part of the character's description should be higher than others.
 			Traits which seem to be a character flaw should be the negative ones.
 			Traits can be anything definitive about the character. 
-			For example, they can be: 
-			• Racial/cultural (elf, barbarian) 
-			• Capabilities (stealthy, wizardry) 
-			• Equipment (chainmail, axe, rope)
+			
 			The structure of the output should be in the form of:
-			[{name:"Longbow",modifier:"+5"},{name:"Elf",modifier:"+4"},{name:"Reckless",modifier:"-2"}]
+			{traits: [
+				{"name":"Acrobatics","modifier":0},
+				{"name":"Animal Handling","modifier":4},
+				{"name":"Arcana","modifier":1},
+				{"name":"Athletics","modifier":5},
+				{"name":"Deception","modifier":2},
+				{"name":"History","modifier":1},
+				{"name":"Insight","modifier":4},
+				{"name":"Intimidation","modifier":2},
+				{"name":"Investigation","modifier":1},
+				{"name":"Medicine","modifier":4},
+				{"name":"Nature","modifier":1},
+				{"name":"Perception","modifier":8},
+				{"name":"Performance","modifier":2},
+				{"name":"Religion","modifier":5},
+				{"name":"Sleight of Hand","modifier":0},
+				{"name":"Stealth","modifier":-3},
+				{"name":"Survival","modifier":4},
+				{"name":"Combat","modifier":5}
+			]}
 			`,
 		  },
 		  { role: "user", content: description },
@@ -150,7 +167,7 @@ conversation.push({"speaker":player,"content":completion.choices[0].message.cont
 	
 */
 
-async function main() {
+/*async function main() {
 	
 	
 	console.log("Welcome. Green texts are for debug only.")
@@ -225,15 +242,16 @@ async function main() {
 		await waitForEnter()
 		index = index + 1
 	}
-}
+}*/
 
 let sessions = {};
 
 // http://expressjs.com/en/starter/basic-routing.html
-app.post('/new_session', function(request, response) {
+app.post('/new_session', async function(request, response) {
   	let username = request.body.username;
   	sessions[username] = {};
-  	let character = {traits: [
+  	let character = await create_player(request.body.hero_description)
+  	/*{traits: [
 		{"name":"Acrobatics","modifier":0},
 		{"name":"Animal Handling","modifier":4},
 		{"name":"Arcana","modifier":1},
@@ -252,10 +270,10 @@ app.post('/new_session', function(request, response) {
 		{"name":"Stealth","modifier":0},
 		{"name":"Survival","modifier":4},
 		{"name":"Combat","modifier":5}
-	]}
+	]}*/
 	//await create_player(fs.readFileSync('./pike.txt','utf-8'))
-	character.description = fs.readFileSync('./pike.txt','utf-8')
-	character.name = "Pike"
+	character.description = request.body.hero_description//fs.readFileSync('./pike.txt','utf-8')
+	character.name = username//"Pike"
 	character.resolve = 30
 
 	let history = []
@@ -266,7 +284,9 @@ app.post('/new_session', function(request, response) {
 	
 	sessions[username] = {character, history, level, level_context, index}
   	
-  	response.json({"status":"success","session":username, history})
+  	console.log(`Created Hero`)
+  	
+  	response.json({"status":"success","session":username, character, history, level, level_context, index })
 });
 
 async function progress(session) {
@@ -320,7 +340,7 @@ async function process_response(session, player_intent) {
 	
 	let player_trait = await choose_trait(challenge, player_intent, character)
 	
-	our_response.debug += `PLAYER USED ${player_trait.name} ${player_trait.modifier}\n`
+	our_response.debug += `PLAYER USED ${player_trait.name} ${player_trait.modifier}<br>`
 	
 	let player_roll = roll.roll("d20").result
 	
@@ -329,10 +349,10 @@ async function process_response(session, player_intent) {
 	// TODO: challenge difficulty should be determined by bot
 	let dc_response = (await choose_dc(challenge, player_intent, character))
 	let dc = dc_response.DC
-	our_response.debug +=  `Bot chose DC ${dc}. Reasoning: ${dc_response.reasoning}\n`
+	our_response.debug +=  `Bot chose DC ${dc}.<br> Reasoning: ${dc_response.reasoning}<br>`
 	let challenge_result = dc //roll.roll().result;
 	
-	our_response.debug +=  `Player got ${player_result} (${player_roll} ${player_trait.modifier}), Challenge got ${challenge_result}\n`
+	our_response.debug +=  `Player got Total: ${player_result} (Roll: (${player_roll}, Modifier:  ${player_trait.modifier}), Challenge was DC ${challenge_result}<br>`
 	
 	if(player_result >= challenge_result) {
 		let result_description = await describe_what_happened(character, player_intent, player_trait, challenge, "success", history,level_context)
@@ -346,12 +366,13 @@ async function process_response(session, player_intent) {
 		our_response.text = result_description
 		history.push(result_description)
 		
-		our_response.debug += `You lose ${(challenge_result - player_result)} resolve. You are at ${character.resolve}\n`	
+		our_response.debug += `You lose ${(challenge_result - player_result)} resolve. You are at ${character.resolve}<br>`	
 	}
 	
 	session.history = history;
 	session.character = character;
 	session.index = session.index + 1 // TODO:Enemies! 
+	
 	return {session, our_response}
 }
 
