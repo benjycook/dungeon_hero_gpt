@@ -34,16 +34,17 @@ async function create_player(description) {
 			role: "system",
 			content: `You are a helpful assistant designed to output JSON. 
 			Your task is to convert the given character description into a list of traits. 
-			Create 8 traits and assign dice to each of them: d12, d10, d10, d8, d8, d6, d6, d6.
+			Create 8 traits and assign a modifier to each of them: +5, +4, +3, +2, +1, +1, -1, -2.
 			The higher the die size, the better the trait. 
 			Traits which seem to be a major part of the character's description should be higher than others.
+			Traits which seem to be a character flaw should be the negative ones.
 			Traits can be anything definitive about the character. 
 			For example, they can be: 
 			• Racial/cultural (elf, barbarian) 
 			• Capabilities (stealthy, wizardry) 
 			• Equipment (chainmail, axe, rope)
 			The structure of the output should be in the form of:
-			[{name:"Longbow",dice:"d12"},{name:"Elf",dice:"d10"}]
+			[{name:"Longbow",modifier:"+5"},{name:"Elf",modifier:"+4"},{name:"Reckless",modifier:"-2"}]
 			`,
 		  },
 		  { role: "user", content: description },
@@ -63,7 +64,7 @@ async function describe_challenge(challenge,history) {
 			The higher the difficulty dice the more challenging the description should seem like.
 			The setting for the challenge is: ${level_context}
 			The latest things that have occurred before this are: ${history.reverse().slice(0,2)}
-			
+			Describe the challenge succinctly in around 100 words.
 			Don't use terms like player or their name. Just use "You" or speak in the second person.
 			`,
 		  },
@@ -81,13 +82,38 @@ async function choose_trait(challenge, answer, character) {
 			role: "system",
 			content: `You are a helpful assistant designed to output JSON. 
 			Your task is to interpret an answer given by a player, choosing the most appropriate trait relevant from their list of traits based on what they said.
-			Only if there is no trait which would be even somewhat relevant, return with a new trait with best name you can for that answer and a d4 for the dice amount.
+			Only if there is no trait which would be even somewhat relevant, return with a new trait with best name you can for that answer and a modifier of 0 for the dice amount.
 			You will be given in JSON format the challenge, their answer and their character.
 			The structure of your response should always be in the form of:
-			{name:"Longbow", dice: "d12"}
+			{name:"Longbow", modifier: "+2"}
 			`,
 		  },
 		  { role: "user", content: JSON.stringify({challenge,answer,traits:character.traits}) },
+		],
+		model: "gpt-3.5-turbo-0125",
+		response_format: { type: "json_object" },
+	});
+	return JSON.parse(completion.choices[0].message.content);
+}
+
+async function choose_dc(challenge, answer, character) {
+	const completion = await openai.chat.completions.create({
+		messages: [
+		  {
+			role: "system",
+			content: `You are a helpful assistant designed to output JSON. 
+			Your task is to set a DC in the D&D 5E style.
+			You will be given the challenge in question, the character trying to overcome it and the action they are doing to overcome the challenge.
+			If the action they are doing is completely unsuitable, makes no sense or does not suit their character at all, set a very high DC like 50.
+			If the action they are doing is actually quite cool, very clever and fitting their character, set a lower DC, like 10.
+			For example:
+			If a character who is not technically proficient tries to construct rocket boots to jump over something, the DC should be 40.
+			If a character who is technically proficient tries to construct rocket boots to jump over something, the DC should be 12.
+			The structure of your response should always be in the form of:
+			{"DC":10, "reasoning":"Because the character, who is a very talented wizard, could easily cast such a spell to light the book on fire."}
+			`,
+		  },
+		  { role: "user", content: JSON.stringify({challenge,action:answer,character}) },
 		],
 		model: "gpt-3.5-turbo-0125",
 		response_format: { type: "json_object" },
@@ -130,7 +156,26 @@ conversation.push({"speaker":player,"content":completion.choices[0].message.cont
 */
 
 async function main() {
-	let character = await create_player(fs.readFileSync('./pike.txt','utf-8'))
+	let character = {traits: [
+		{"name":"Acrobatics","modifier":0},
+		{"name":"Animal Handling","modifier":4},
+		{"name":"Arcana","modifier":1},
+		{"name":"Athletics","modifier":5},
+		{"name":"Deception","modifier":2},
+		{"name":"History","modifier":1},
+		{"name":"Insight","modifier":4},
+		{"name":"Intimidation","modifier":2},
+		{"name":"Investigation","modifier":1},
+		{"name":"Medicine","modifier":4},
+		{"name":"Nature","modifier":1},
+		{"name":"Perception","modifier":8},
+		{"name":"Performance","modifier":2},
+		{"name":"Religion","modifier":5},
+		{"name":"Sleight of Hand","modifier":0},
+		{"name":"Stealth","modifier":0},
+		{"name":"Survival","modifier":4},
+		{"name":"Combat","modifier":5}
+	]}//await create_player(fs.readFileSync('./pike.txt','utf-8'))
 	character.description = fs.readFileSync('./pike.txt','utf-8')
 	character.name = "Pike"
 	character.resolve = 30
@@ -177,12 +222,19 @@ async function main() {
 			});
 			let player_trait = await choose_trait(challenge, player_intent, character)
 			
-			console.log(`PLAYER USED ${player_trait.name}`.green)
+			console.log(`PLAYER USED ${player_trait.name} ${player_trait.modifier}`.green)
 			
-			let player_result = roll.roll(player_trait.dice).result;
-			let challenge_result = roll.roll(challenge.difficulty).result;
+			let player_roll = roll.roll("d20").result
 			
-			console.log(`Player got ${player_result}, Challenge got ${challenge_result}`.green)
+			let player_result = player_roll+parseInt(player_trait.modifier,10);
+			
+			// TODO: challenge difficulty should be determined by bot
+			let dc_response = (await choose_dc(challenge, player_intent, character))
+			let dc = dc_response.DC
+			console.log(`Bot chose DC ${dc}. Reasoning: ${dc_response.reasoning}`.green)
+			let challenge_result = dc //roll.roll().result;
+			
+			console.log(`Player got ${player_result} (${player_roll} ${player_trait.modifier}), Challenge got ${challenge_result}`.green)
 			
 			if(player_result >= challenge_result) {
 				let result_description = await describe_what_happened(character, player_intent, player_trait, challenge, "success", history)
