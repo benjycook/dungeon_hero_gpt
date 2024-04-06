@@ -2,30 +2,24 @@ const fs = require('fs')
 require("dotenv").config()
 const OpenAI = require("openai")
 const openai = new OpenAI({"apiKey":process.env.OPENAIKEY});
-const readline = require('node:readline');
 
 var colors = require('colors');
 
 var Roll = require('roll'),
   roll = new Roll();
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
 
-// Function to wait for user to press Enter
-const waitForEnter = () => {
-  return new Promise((resolve) => {
-    rl.question('Press Enter to continue...', (answer) => {
-      resolve();
-    });
-  });
-};
+// init project
+var express = require('express');
+var app = express();
 
-const level = JSON.parse(fs.readFileSync('./level.json'))
-const level_context = `Rumors tell of robed cultists filing into the ruined castle of King Charon, the despot who employed foul magics to oppress his people long ago. Now, a demon has attacked the Hierophant, and it is clear infernal dealings are afoot. You have come to the ruins, hoping to investigate whether the rumors are true, and, if so, to put a stop to the cultists before even worse demons are unleashed upon the world.`
-let index = 0
+// we've started you off with Express, 
+// but feel free to use whatever libs or frameworks you'd like through `package.json`.
+
+// http://expressjs.com/en/starter/static-files.html
+app.use(express.static('public'));
+app.use(express.json());
+
 
 async function create_player(description) {
 	const completion = await openai.chat.completions.create({
@@ -55,7 +49,7 @@ async function create_player(description) {
 	return JSON.parse(completion.choices[0].message.content);
 }
 
-async function describe_challenge(challenge,history) {
+async function describe_challenge(challenge,history,level_context) {
 	const completion = await openai.chat.completions.create({
 		messages: [
 		  {
@@ -121,7 +115,7 @@ async function choose_dc(challenge, answer, character) {
 	return JSON.parse(completion.choices[0].message.content);
 }
 
-async function describe_what_happened(character, player_intent, player_trait, challenge,result,history) {
+async function describe_what_happened(character, player_intent, player_trait, challenge,result,history,level_context) {
 	const completion = await openai.chat.completions.create({
 		messages: [
 		  {
@@ -157,31 +151,7 @@ conversation.push({"speaker":player,"content":completion.choices[0].message.cont
 */
 
 async function main() {
-	let character = {traits: [
-		{"name":"Acrobatics","modifier":0},
-		{"name":"Animal Handling","modifier":4},
-		{"name":"Arcana","modifier":1},
-		{"name":"Athletics","modifier":5},
-		{"name":"Deception","modifier":2},
-		{"name":"History","modifier":1},
-		{"name":"Insight","modifier":4},
-		{"name":"Intimidation","modifier":2},
-		{"name":"Investigation","modifier":1},
-		{"name":"Medicine","modifier":4},
-		{"name":"Nature","modifier":1},
-		{"name":"Perception","modifier":8},
-		{"name":"Performance","modifier":2},
-		{"name":"Religion","modifier":5},
-		{"name":"Sleight of Hand","modifier":0},
-		{"name":"Stealth","modifier":0},
-		{"name":"Survival","modifier":4},
-		{"name":"Combat","modifier":5}
-	]}//await create_player(fs.readFileSync('./pike.txt','utf-8'))
-	character.description = fs.readFileSync('./pike.txt','utf-8')
-	character.name = "Pike"
-	character.resolve = 30
 	
-	let history = []
 	
 	console.log("Welcome. Green texts are for debug only.")
 	console.log("For this demo, you will play as Pike Trickfoot".yellow)
@@ -257,5 +227,153 @@ async function main() {
 	}
 }
 
+let sessions = {};
 
-main().catch(console.error)
+// http://expressjs.com/en/starter/basic-routing.html
+app.post('/new_session', function(request, response) {
+  	let username = request.body.username;
+  	sessions[username] = {};
+  	let character = {traits: [
+		{"name":"Acrobatics","modifier":0},
+		{"name":"Animal Handling","modifier":4},
+		{"name":"Arcana","modifier":1},
+		{"name":"Athletics","modifier":5},
+		{"name":"Deception","modifier":2},
+		{"name":"History","modifier":1},
+		{"name":"Insight","modifier":4},
+		{"name":"Intimidation","modifier":2},
+		{"name":"Investigation","modifier":1},
+		{"name":"Medicine","modifier":4},
+		{"name":"Nature","modifier":1},
+		{"name":"Perception","modifier":8},
+		{"name":"Performance","modifier":2},
+		{"name":"Religion","modifier":5},
+		{"name":"Sleight of Hand","modifier":0},
+		{"name":"Stealth","modifier":0},
+		{"name":"Survival","modifier":4},
+		{"name":"Combat","modifier":5}
+	]}
+	//await create_player(fs.readFileSync('./pike.txt','utf-8'))
+	character.description = fs.readFileSync('./pike.txt','utf-8')
+	character.name = "Pike"
+	character.resolve = 30
+
+	let history = []
+	
+	const level = JSON.parse(fs.readFileSync('./level.json'))
+	const level_context = `Rumors tell of robed cultists filing into the ruined castle of King Charon, the despot who employed foul magics to oppress his people long ago. Now, a demon has attacked the Hierophant, and it is clear infernal dealings are afoot. You have come to the ruins, hoping to investigate whether the rumors are true, and, if so, to put a stop to the cultists before even worse demons are unleashed upon the world.`
+	let index = 0
+	
+	sessions[username] = {character, history, level, level_context, index}
+  	
+  	response.json({"status":"success","session":username, history})
+});
+
+async function progress(session) {
+	let index = session.index;
+	let level = session.level
+	let character = session.character
+	if(index > level.length) {
+		return {text:"The level is complete. YOU WON!"};
+	}
+	
+	if(character.resolve <= 0) {
+		return {text:"You have lost your resolve. GAME OVER."}
+	}
+	
+	let challenge = session.level[session.index]
+	
+	if(challenge.type=="plot") { 
+		session.history.push(challenge.description)
+		index = index + 1
+		session.index = index
+		return {text: challenge.description, session}
+	}
+	
+	if(challenge.type=="enemy") { 
+		//TODO: Enemies
+	
+		index = index + 1
+		session.index = index
+		return {text: "Continue (nothing here because of TODO: Enemies)", session}
+	}
+	
+	if(challenge.type=="challenge") { 
+		let description = await describe_challenge(challenge, session.history, session.level_context);
+		return {text: description, query:'What do you do?', session}
+	}
+	
+	session.index = index
+	return session
+}
+
+async function process_response(session, player_intent) {
+	let our_response = {
+		debug:"",
+		text: ""
+	}
+	
+	let challenge = session.level[session.index]
+	let character = session.character
+	let history = session.history;
+	let level_context = session.level_context
+	
+	let player_trait = await choose_trait(challenge, player_intent, character)
+	
+	our_response.debug += `PLAYER USED ${player_trait.name} ${player_trait.modifier}\n`
+	
+	let player_roll = roll.roll("d20").result
+	
+	let player_result = player_roll+parseInt(player_trait.modifier,10);
+	
+	// TODO: challenge difficulty should be determined by bot
+	let dc_response = (await choose_dc(challenge, player_intent, character))
+	let dc = dc_response.DC
+	our_response.debug +=  `Bot chose DC ${dc}. Reasoning: ${dc_response.reasoning}\n`
+	let challenge_result = dc //roll.roll().result;
+	
+	our_response.debug +=  `Player got ${player_result} (${player_roll} ${player_trait.modifier}), Challenge got ${challenge_result}\n`
+	
+	if(player_result >= challenge_result) {
+		let result_description = await describe_what_happened(character, player_intent, player_trait, challenge, "success", history,level_context)
+		our_response.text = result_description
+		history.push(result_description)
+	}
+	
+	if(player_result < challenge_result) {
+		let result_description = await describe_what_happened(character, player_intent, player_trait, challenge, "failure", history,level_context)
+		character.resolve = character.resolve - (challenge_result - player_result)
+		our_response.text = result_description
+		history.push(result_description)
+		
+		our_response.debug += `You lose ${(challenge_result - player_result)} resolve. You are at ${character.resolve}\n`	
+	}
+	
+	session.history = history;
+	session.character = character;
+	session.index = session.index + 1 // TODO:Enemies! 
+	return {session, our_response}
+}
+
+app.post('/progress', async function(request, response) {
+	let session = sessions[request.body.username];
+	let result = await (progress(session))
+	sessions[request.body.username] = result.session
+	return response.json(result)
+})
+
+app.post('/user_response', async function(request, response) {
+	let session = sessions[request.body.username];
+	let player_intent = request.body.user_response;
+	
+	let result = await process_response(session, player_intent);
+	sessions[request.body.username] = result.session;
+	return response.json(result.our_response);
+})
+
+// listen for requests :)
+var listener = app.listen(process.env.PORT, function() {
+  console.log('Your app is listening on port ' + listener.address().port);
+});
+
+//main().catch(console.error)
